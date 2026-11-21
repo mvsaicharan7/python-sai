@@ -1,1 +1,137 @@
+import re
+import time
+import random
 
+HONORIFICS = {"dr", "mr", "mrs", "ms", "prof", "er", "shri", "smt"}
+
+def normalise_phone(raw_phone: str) -> str:
+    """Strips non-digits and keeps the last 10 digits for standard matching."""
+    if not raw_phone:
+        return ""
+    digits = re.sub(r"\D", "", raw_phone)
+    return digits[-10:] if len(digits) > 10 else digits
+
+def normalise_name(raw_name: str) -> str:
+    """Removes punctuation/honorifics and formats in Title Case."""
+    if not raw_name:
+        return ""
+    cleaned = re.sub(r"[^\w\s]", " ", raw_name).strip()
+    tokens = [t for t in cleaned.split() if t.lower() not in HONORIFICS]
+    return " ".join(tokens).title() if tokens else cleaned.title()
+
+def choose_best_name(existing_name: str, candidate_name: str) -> str:
+    """Retains the more descriptive (longer) normalised name."""
+    if not existing_name:
+        return candidate_name
+    if not candidate_name:
+        return existing_name
+    return candidate_name if len(candidate_name) > len(existing_name) else existing_name
+
+def merge_contacts_dict(contacts: list[dict]) -> list[dict]:
+    """Merges contacts in O(n) average time using a phone-keyed dictionary."""
+    merged_by_phone = {}
+    no_phone_contacts = []
+
+    for contact in contacts:
+        norm_phone = normalise_phone(contact.get("phone", ""))
+        norm_name = normalise_name(contact.get("name", ""))
+        raw_email = (contact.get("email") or "").strip().lower()
+
+        if not norm_phone:
+            no_phone_contacts.append({
+                "name": norm_name or "Unknown",
+                "phones": set(),
+                "emails": {raw_email} if raw_email else set(),
+            })
+            continue
+
+        if norm_phone not in merged_by_phone:
+            merged_by_phone[norm_phone] = {
+                "name": norm_name or "Unknown",
+                "phones": {norm_phone},
+                "emails": {raw_email} if raw_email else set(),
+            }
+        else:
+            record = merged_by_phone[norm_phone]
+            record["name"] = choose_best_name(record["name"], norm_name)
+            record["phones"].add(norm_phone)
+            if raw_email:
+                record["emails"].add(raw_email)
+
+    return list(merged_by_phone.values()) + no_phone_contacts
+
+def merge_contacts_pairwise(contacts: list[dict]) -> list[dict]:
+    """Alternative O(n^2) pairwise scan for complexity comparison."""
+    merged = []
+    for contact in contacts:
+        norm_phone = normalise_phone(contact.get("phone", ""))
+        norm_name = normalise_name(contact.get("name", ""))
+        raw_email = (contact.get("email") or "").strip().lower()
+
+        found = False
+        if norm_phone:
+            for record in merged:
+                if norm_phone in record["phones"]:
+                    record["name"] = choose_best_name(record["name"], norm_name)
+                    if raw_email:
+                        record["emails"].add(raw_email)
+                    found = True
+                    break
+
+        if not found:
+            merged.append({
+                "name": norm_name or "Unknown",
+                "phones": {norm_phone} if norm_phone else set(),
+                "emails": {raw_email} if raw_email else set(),
+            })
+    return merged
+
+# 1. Hand-Verified Small Test List
+small_contacts = [
+    {"name": "Dr. Ravi",     "phone": "+91 98400 12345", "email": "ravi@clinic.in"},
+    {"name": "ravi kumar",   "phone": "9840012345",      "email": "ravikumar@gmail.com"},
+    {"name": "Ravi",         "phone": "098400-12345",    "email": ""},
+    {"name": "Priya Sharma", "phone": "+91-98401-55555", "email": "priya@work.com"},
+    {"name": "Priya Sharma", "phone": "98402 66666",     "email": "priya.s@mail.com"},
+    {"name": "Anand",        "phone": "",                "email": "anand@example.com"},
+    {"name": "",             "phone": "98403 77777",     "email": ""},
+]
+
+print("=== HAND-VERIFIED SMALL LIST OUTPUT ===")
+for idx, c in enumerate(merge_contacts_dict(small_contacts), 1):
+    print(f"{idx}. Name: {c['name']:<14} | Phones: {sorted(c['phones'])} | Emails: {sorted(c['emails'])}")
+
+# 2. Benchmark for 1,000 and 100,000 Contacts
+def generate_contacts(n: int, unique_ratio: float = 0.7) -> list[dict]:
+    random.seed(42)
+    unique_count = int(n * unique_ratio)
+    base_numbers = [f"9840{i:06d}" for i in range(unique_count)]
+    formats = [
+        lambda num: f"+91 {num[:5]} {num[5:]}",
+        lambda num: num,
+        lambda num: f"0{num[:5]}-{num[5:]}",
+    ]
+    return [
+        {
+            "name": f"Dr. User {num[-4:]}" if i % 3 == 0 else f"user {num[-4:]} full",
+            "phone": random.choice(formats)(num),
+            "email": f"u{i % unique_count}@mail.com" if i % 4 != 0 else "",
+        }
+        for i in range(n)
+        for num in [random.choice(base_numbers)]
+    ]
+
+print("\n=== BENCHMARK RESULTS ===")
+for n in [1000, 100000]:
+    data = generate_contacts(n)
+    t0 = time.perf_counter()
+    res_dict = merge_contacts_dict(data)
+    t_dict = (time.perf_counter() - t0) * 1000
+
+    if n == 1000:
+        t0 = time.perf_counter()
+        res_pair = merge_contacts_pairwise(data)
+        t_pair = (time.perf_counter() - t0) * 1000
+        print(f"N = {n:>7,} | Unique: {len(res_dict):>6,} | Dict Time: {t_dict:>8.2f} ms | Pairwise Time: {t_pair:>8.2f} ms | Match: {len(res_dict) == len(res_pair)}")
+    else:
+        print(f"N = {n:>7,} | Unique: {len(res_dict):>6,} | Dict Time: {t_dict:>8.2f} ms | Pairwise: O(n^2) (~10,000x N=1,000)")
