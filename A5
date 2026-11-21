@@ -1,1 +1,73 @@
+import sqlite3
+import time
+from collections import Counter
 
+# 1. Sentiment Scorer (TODO 1)
+POSITIVE = {"good", "clean", "fast", "helpful", "improved"}
+NEGATIVE = {"bad", "dirty", "slow", "rude", "smoke", "broken"}
+NEGATORS = {"not", "never", "no"}
+
+def score(text):
+    words = text.lower().replace(".", " ").replace(",", " ").split()
+    total = 0
+    for i, w in enumerate(words):
+        val = 1 if w in POSITIVE else (-1 if w in NEGATIVE else 0)
+        if val != 0 and i > 0 and words[i - 1] in NEGATORS:
+            val = -val
+        total += val
+    return total
+
+def label(text):
+    s = score(text)
+    return "positive" if s > 0 else "negative" if s < 0 else "neutral"
+
+# 2. Summarisers (Frequency vs Lead-k)
+STOPWORDS = {
+    "the", "is", "are", "was", "were", "a", "an", "and", "or", "in", "on", "at",
+    "to", "for", "of", "with", "from", "by", "this", "that", "it", "we", "they",
+    "i", "my", "our", "very", "so", "too", "have", "has", "been", "be", "but",
+}
+
+def summarize_frequency(text: str, k: int = 1) -> str:
+    sentences = [s.strip() for s in text.split(".") if s.strip()]
+    if len(sentences) <= k:
+        return ". ".join(sentences) + "."
+    words = [w for w in text.lower().replace(".", " ").replace(",", " ").split()
+             if w not in STOPWORDS and len(w) > 2]
+    freq = Counter(words)
+    scored = [(sum(freq[w] for w in s.lower().replace(",", " ").split() if w in freq), idx, s)
+              for idx, s in enumerate(sentences)]
+    top_k = sorted(sorted(scored, key=lambda x: (-x[0], x[1]))[:k], key=lambda x: x[1])
+    return ". ".join(s for _, _, s in top_k) + "."
+
+def summarize_lead_k(text: str, k: int = 1) -> str:
+    sentences = [s.strip() for s in text.split(".") if s.strip()]
+    return ". ".join(sentences[:k]) + "."
+
+# 3. Database Index Benchmark (96,000 rows: 100 stations x 10 days x 96 readings/day)
+conn = sqlite3.connect(":memory:")
+cur = conn.cursor()
+cur.execute("CREATE TABLE readings (id INTEGER PRIMARY KEY, station TEXT, day TEXT, ts TEXT, aqi REAL)")
+rows = [
+    (f"ST_{st:03d}", f"2026-11-{d:02d}", f"{(slot*15)//60:02d}:{(slot*15)%60:02d}", 50.0 + (st % 40))
+    for st in range(1, 101) for d in range(1, 11) for slot in range(96)
+]
+cur.executemany("INSERT INTO readings (station, day, ts, aqi) VALUES (?, ?, ?, ?)", rows)
+conn.commit()
+
+query = "SELECT AVG(aqi), MAX(aqi), COUNT(*) FROM readings WHERE station = ? AND day = ?"
+params = ("ST_075", "2026-11-08")
+
+t0 = time.perf_counter()
+for _ in range(20): cur.execute(query, params).fetchone()
+t_before = ((time.perf_counter() - t0) / 20) * 1000
+
+cur.execute("CREATE INDEX idx_station_day ON readings (station, day)")
+conn.commit()
+
+t0 = time.perf_counter()
+for _ in range(20): cur.execute(query, params).fetchone()
+t_after = ((time.perf_counter() - t0) / 20) * 1000
+
+print(f"DB Query -> Before Index: {t_before:.3f} ms | After Index: {t_after:.3f} ms | Speedup: {t_before/t_after:.1f}x")
+conn.close()
