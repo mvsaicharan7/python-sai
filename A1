@@ -1,1 +1,109 @@
+from decimal import Decimal, ROUND_HALF_UP
+
+# ==========================================
+# REVISED DESIGN: Milk Procurement Pricing System
+# ==========================================
+
+RATE_CARDS = {
+    "standard": {  # July to March
+        "base_rate": Decimal("30.00"),
+        "fat_step_rate": Decimal("0.40"),
+        "snf_step_rate": Decimal("0.30"),
+    },
+    "summer": {    # April to June
+        "base_rate": Decimal("32.00"),
+        "fat_step_rate": Decimal("0.45"),
+        "snf_step_rate": Decimal("0.30"),
+    },
+}
+
+BASE_FAT = Decimal("3.50")
+BASE_SNF = Decimal("8.50")
+STEP_SIZE = Decimal("0.10")
+
+BONUS_THRESHOLD_LITRES = Decimal("500.00")
+BONUS_RATE_PER_LITRE = Decimal("0.50")
+
+
+def get_rate_card(month: int) -> tuple[str, dict]:
+    """Selects the seasonal rate card based on the month (1-12)."""
+    if not 1 <= month <= 12:
+        raise ValueError("Month must be between 1 and 12.")
+    if 4 <= month <= 6:
+        return "summer", RATE_CARDS["summer"]
+    return "standard", RATE_CARDS["standard"]
+
+
+def calculate_steps(reading: float, base: Decimal, step_size: Decimal = STEP_SIZE) -> Decimal:
+    """Calculates exact fractional steps for two-decimal analyser readings."""
+    reading_dec = Decimal(str(reading)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (reading_dec - base) / step_size
+
+
+def calculate_unit_rate(fat: float, snf: float, month: int) -> tuple[str, Decimal]:
+    """Calculates per-litre rate using the seasonal rate card and 2-decimal precision."""
+    season, card = get_rate_card(month)
+    fat_steps = calculate_steps(fat, BASE_FAT)
+    snf_steps = calculate_steps(snf, BASE_SNF)
+
+    raw_rate = (
+        card["base_rate"]
+        + (fat_steps * card["fat_step_rate"])
+        + (snf_steps * card["snf_step_rate"])
+    )
+    unit_rate = raw_rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return season, unit_rate
+
+
+def calculate_ten_day_bonus(ten_day_litres: float) -> Decimal:
+    """Awards Rs 0.50/litre bonus strictly when 10-day supply exceeds 500 litres."""
+    litres_dec = Decimal(str(ten_day_litres))
+    if litres_dec > BONUS_THRESHOLD_LITRES:
+        return (litres_dec * BONUS_RATE_PER_LITRE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return Decimal("0.00")
+
+
+def calculate_payout(fat: float, snf: float, ten_day_litres: float, month: int) -> dict:
+    """Computes complete 10-day farmer payout breakdown."""
+    season, unit_rate = calculate_unit_rate(fat, snf, month)
+    litres_dec = Decimal(str(ten_day_litres))
+    base_payout = (unit_rate * litres_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    bonus = calculate_ten_day_bonus(ten_day_litres)
+    total_payout = base_payout + bonus
+
+    return {
+        "month": month,
+        "season": season,
+        "fat": f"{fat:.2f}%",
+        "snf": f"{snf:.2f}%",
+        "litres": float(litres_dec),
+        "unit_rate": float(unit_rate),
+        "base_payout": float(base_payout),
+        "bonus": float(bonus),
+        "total_payout": float(total_payout),
+    }
+
+
+# ==========================================
+# TEST SUITE
+# ==========================================
+test_cases = [
+    ("TC1: Standard Season, No Bonus (<500L)",       4.25, 8.65, 450.0, 11),
+    ("TC2: Standard Season, Exact Boundary (500L)",  4.25, 8.65, 500.0, 11),
+    ("TC3: Standard Season, With Bonus (>500L)",     4.25, 8.65, 520.0, 11),
+    ("TC4: Summer Season (Apr-Jun), No Bonus",       4.25, 8.65, 450.0, 5),
+    ("TC5: Summer Season (Apr-Jun), With Bonus",     4.25, 8.65, 520.0, 5),
+    ("TC6: Summer Season, Below-Base SNF Deduction", 3.85, 8.35, 600.0, 4),
+]
+
+print(f"{'Test Case':<45} | {'Season':<8} | {'Rate/L':>7} | {'Base (Rs)':>10} | {'Bonus (Rs)':>10} | {'Total (Rs)':>11}")
+print("-" * 105)
+for name, fat, snf, litres, month in test_cases:
+    res = calculate_payout(fat, snf, litres, month)
+    print(
+        f"{name:<45} | {res['season']:<8} | {res['unit_rate']:>7.2f} | "
+        f"{res['base_payout']:>10.2f} | {res['bonus']:>10.2f} | {res['total_payout']:>11.2f}"
+    )
+
+
 
