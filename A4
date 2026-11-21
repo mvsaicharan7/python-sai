@@ -1,1 +1,45 @@
+"""Validation and parsing utilities using pure string methods."""
 
+def is_valid_email(email: str) -> bool:
+    """Validates an e-mail address using string methods only (no regex)."""
+    email = email.strip()
+    if not email or " " in email or email.count("@") != 1:
+        return False
+
+    local, domain = email.split("@")
+    if not local or not domain or "." not in domain:
+        return False
+    if domain.startswith(".") or domain.endswith(".") or ".." in domain:
+        return False
+    if local.startswith(".") or local.endswith("."):
+        return False
+
+    tld = domain.rsplit(".", 1)[1]
+    return len(tld) >= 2 and tld.isalpha()
+
+
+def parse_and_validate_line(line: str) -> tuple[dict | None, str | None]:
+    """Parses a CSV registration line; returns (record, None) or (None, error)."""
+    parts = [p.strip() for p in line.strip().split(",")]
+    if len(parts) != 5:
+        return None, f"Damaged line: expected 5 fields, got {len(parts)}"
+
+    reg_no, name, dept, email, events_raw = parts
+    reg_no, dept, email = reg_no.upper(), dept.upper(), email.lower()
+
+    if not reg_no or not name or not dept:
+        return None, "Damaged line: missing register number, name, or department"
+    if not is_valid_email(email):
+        return None, f"Invalid e-mail address: '{email}'"
+
+    events = [e.strip().title() for e in events_raw.split(";") if e.strip()]
+    if not events:
+        return None, "Damaged line: no valid events selected"
+
+    return {
+        "reg_no": reg_no,
+        "name": name,
+        "dept": dept,
+        "email": email,
+        "events": events,
+    }, None
