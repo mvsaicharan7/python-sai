@@ -1,1 +1,88 @@
+import time
+import tracemalloc
 
+# ==========================================================
+# ORIGINAL PROGRAM: Naive Trial Division
+# ==========================================================
+def primes_trial_division(n: int) -> tuple[list[int], int]:
+    """Finds all primes up to n using naive trial division."""
+    primes = []
+    op_count = 0  # Counts modulo (%) divisibility checks
+
+    for num in range(2, n + 1):
+        is_prime = True
+        for divisor in range(2, num):
+            op_count += 1
+            if num % divisor == 0:
+                is_prime = False
+                break
+        if is_prime:
+            primes.append(num)
+
+    return primes, op_count
+
+
+# ==========================================================
+# REDESIGNED PROGRAM: Sieve of Eratosthenes
+# ==========================================================
+def primes_sieve(n: int) -> tuple[list[int], int]:
+    """Finds all primes up to n using the Sieve of Eratosthenes."""
+    if n < 2:
+        return [], 0
+
+    is_prime = [True] * (n + 1)
+    is_prime[0] = is_prime[1] = False
+    op_count = 0  # Counts composite-marking operations
+
+    p = 2
+    while p * p <= n:
+        if is_prime[p]:
+            for multiple in range(p * p, n + 1, p):
+                is_prime[multiple] = False
+                op_count += 1
+        p += 1
+
+    primes = [i for i, flag in enumerate(is_prime) if flag]
+    return primes, op_count
+
+
+# ==========================================================
+# VALIDATION & BENCHMARK HARNESS
+# ==========================================================
+test_inputs = [1000, 5000, 10000, 20000]
+
+print(
+    f"{'N':>7} | {'Primes':>6} | {'Orig Ops':>12} | {'Orig Time (ms)':>14} | "
+    f"{'Sieve Ops':>10} | {'Sieve Time (ms)':>15} | {'Speedup':>8} | {'Match':>5}"
+)
+print("-" * 98)
+
+for n in test_inputs:
+    t0 = time.perf_counter()
+    p_orig, ops_orig = primes_trial_division(n)
+    t_orig = (time.perf_counter() - t0) * 1000
+
+    t0 = time.perf_counter()
+    p_sieve, ops_sieve = primes_sieve(n)
+    t_sieve = (time.perf_counter() - t0) * 1000
+
+    match = (p_orig == p_sieve)
+    speedup = t_orig / t_sieve if t_sieve > 0 else float("inf")
+
+    print(
+        f"{n:>7} | {len(p_orig):>6} | {ops_orig:>12,} | {t_orig:>14.3f} | "
+        f"{ops_sieve:>10,} | {t_sieve:>15.3f} | {speedup:>7.1f}x | {str(match):>5}"
+    )
+
+# Peak memory comparison at N = 20,000
+tracemalloc.start()
+primes_trial_division(20000)
+_, peak_orig = tracemalloc.get_traced_memory()
+tracemalloc.stop()
+
+tracemalloc.start()
+primes_sieve(20000)
+_, peak_sieve = tracemalloc.get_traced_memory()
+tracemalloc.stop()
+
+print(f"\nPeak Memory at N = 20,000 -> Original: {peak_orig / 1024:.2f} KB | Sieve: {peak_sieve / 1024:.2f} KB")
